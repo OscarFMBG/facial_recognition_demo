@@ -1,2 +1,2 @@
-# facial_recognition_demo
-Facial recognition demo from 5. PK
+# Facial Recognition Demo
+Facial recognition demo for 5. PK.
