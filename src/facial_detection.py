@@ -50,15 +50,32 @@ class DlibFaceDetector(BaseFaceDetector):
 
     class Faces:
 
-        def __init__(self, default_max_encoding_match_dist=0.6):
+        def __init__(self,
+                     known_face_images=None,
+                     known_face_encodings=None,
+                     default_max_encoding_match_dist=0.6):
             self.default_max_encoding_match_dist = default_max_encoding_match_dist
             self.ids = []
             self.locations = []
             self.encodings = []
             self.id_index_location_index_map = {}
             self.location_index_id_index_map = {}
-            self.id_index_encoding_index_map = {}
+            self.id_index_encoding_indicies_map = {}
             self.encoding_index_id_index_map = {}
+            if known_face_encodings is None:
+                known_face_encodings = {}
+            if known_face_images is not None:
+                for id, images in known_face_images.items():
+                    encodings = [
+                        dlib_face_recognition.face_encodings(
+                            dlib_face_recognition.load_image_file(image)
+                        )[0]
+                        for image in images
+                    ]
+                    known_face_encodings[id] = encodings
+            for id, encodings in known_face_encodings.items():
+                for encoding in encodings:
+                    self.add_id_with_encoding_and_location(id, encoding, UnknownLocation())
 
         def __iter__(self):
             for id_index, id in enumerate(self.ids):
@@ -79,7 +96,7 @@ class DlibFaceDetector(BaseFaceDetector):
             self.location_index_id_index_map[location_index] = id_index
 
         def map_id_index_to_encoding_index(self, id_index, encoding_index):
-            self.id_index_encoding_index_map[id_index] = encoding_index
+            self.id_index_encoding_indicies_map[id_index] = [encoding_index]
             self.encoding_index_id_index_map[encoding_index] = id_index
 
         def add_id_with_encoding_and_location(self, id, encoding, location):
@@ -93,6 +110,7 @@ class DlibFaceDetector(BaseFaceDetector):
             self.map_id_index_to_location_index(id_index, location_index)
 
         def change_location_from_id_index(self, id_index, new_location):
+            """Changes the location of a face with a given id."""
             location_index = self.id_index_location_index_map[id_index]
             self.locations[location_index] = new_location
 
@@ -100,6 +118,7 @@ class DlibFaceDetector(BaseFaceDetector):
             self.locations = [UnknownLocation() for _ in range(len(self.locations))]
 
         def encoding_match_index(self, encoding, max_encoding_match_dist=None):
+            """Returns the index of the nearest matching cached encoding."""
             if max_encoding_match_dist is None:
                 max_encoding_match_dist = self.default_max_encoding_match_dist
             min_encoding_dist = math.inf
@@ -123,7 +142,8 @@ class DlibFaceDetector(BaseFaceDetector):
                  image_scale_factor=0.25,
                  **kwargs):
         self.image_scale_factor = image_scale_factor
-        self.faces = self.Faces()
+        self.faces = self.Faces(*args, **kwargs)
+        self.unknown_face_num = 1
 
     def update_from_image(self, original_image):
         rgb_small_frame = cv.resize(
@@ -132,7 +152,7 @@ class DlibFaceDetector(BaseFaceDetector):
             fx=self.image_scale_factor,
             fy=self.image_scale_factor
         )[:, :, ::-1]
-        dlib_face_locations = dlib_face_recognition.face_locations(rgb_small_frame, model="cnn")
+        dlib_face_locations = dlib_face_recognition.face_locations(rgb_small_frame)
         face_encodings = dlib_face_recognition.face_encodings(rgb_small_frame, dlib_face_locations)
         self.faces.set_all_locations_to_unknown()
         for (top, right, bottom, left), face_encoding in zip(dlib_face_locations, face_encodings):
@@ -147,7 +167,8 @@ class DlibFaceDetector(BaseFaceDetector):
                 self.faces.change_location_from_id_index(face_id_index, face_location)
             except NoMatchingEncodingError:
                 self.faces.add_id_with_encoding_and_location(
-                    f"Unknown Face#{len(self.faces.ids)}",
+                    f"unknown face#{self.unknown_face_num}",
                     face_encoding,
                     face_location
                 )
+                self.unknown_face_num += 1
